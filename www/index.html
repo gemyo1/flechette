@@ -49,7 +49,7 @@ button.pri{background:linear-gradient(135deg,var(--ac),#e8892b);border-color:var
   <div id="cal" class="card">
     <small style="color:var(--mu)">Glissez sur l’image pour centrer le repère sur le milieu de la cible, puis réglez la taille (anneau double extérieur) et la rotation (le 20 en haut).</small>
     <label>Taille</label><input type="range" id="rs" min="0.1" max="0.6" step="0.002" style="width:100%">
-    <label>Rotation</label><input type="range" id="rr" min="-20" max="20" step="0.5" style="width:100%">
+    <label>Rotation</label><input type="range" id="rr" min="-20" max="20" step="0.5" style="width:100%"><button id="bAuto" class="pri" style="width:100%;margin-top:8px">Calage automatique</button><div id="calmsg" style="font-size:13px;margin-top:6px;color:var(--mu)"></div>
   </div>
   <div id="pl"></div>
   <div id="ds"></div>
@@ -70,7 +70,7 @@ button.pri{background:linear-gradient(135deg,var(--ac),#e8892b);border-color:var
 const $=id=>document.getElementById(id);
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ORDER=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
-const cfg={x:.5,y:.5,r:.35,rot:0};
+const cfg={x:.5,y:.5,r:.35,rot:0,m:[.35,0,0,.35]};
 let G={players:[],cur:0,mode:501,dout:true,darts:[],start:501,bust:false,win:false};
 let camErr='',photoMode=false,armed=false,manual=false,calib=true,ref=null,prev=null,st='idle',still=0,timer=null,stream=null;
 const vid=$('vid'),cv=$('cv'),wrap=$('wrap');
@@ -96,7 +96,7 @@ async function startCam(){
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw{name:'API caméra absente'};
     const to=new Promise((_,j)=>setTimeout(()=>j({name:'aucune réponse du navigateur'}),6000));
     stream=await Promise.race([navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false}),to]);
-    vid.srcObject=stream;vid.play().catch(()=>{});
+    vid.srcObject=stream;vid.play().catch(()=>{});setTimeout(()=>autoCal(0),1500);
     vid.onloadedmetadata=fit;if(vid.videoWidth)fit();
   }catch(e){
     manual=true;$('bMan').classList.add('pri');
@@ -106,15 +106,16 @@ async function startCam(){
 function fit(){const r=vid.videoWidth/vid.videoHeight;wrap.style.aspectRatio=r;wrap.style.width='min(100%,'+(52*r)+'vh)';draw()}
 new ResizeObserver(()=>draw()).observe(wrap);
 
+function bp(dx,dy,W){const m=cfg.m,a=m[0]*W,b=m[1]*W,c=m[2]*W,d=m[3]*W,t=a*d-b*c;return[(d*dx-b*dy)/t,(-c*dx+a*dy)/t]}
 /* ---------- scoring ---------- */
 function hit(nx,ny){
   const W=wrap.clientWidth,H=wrap.clientHeight;
   const dx=(nx-cfg.x)*W,dy=(ny-cfg.y)*H;
-  const d=Math.hypot(dx,dy)/(cfg.r*W)*170;
+  const q=bp(dx,dy,W),d=Math.hypot(q[0],q[1])*170;
   if(d<6.35)return{pts:50,dbl:true,label:'50',x:nx,y:ny};
   if(d<15.9)return{pts:25,dbl:false,label:'25',x:nx,y:ny};
   if(d>170)return{pts:0,dbl:false,label:'0',x:nx,y:ny};
-  let a=Math.atan2(dx,-dy)*180/Math.PI-cfg.rot;a=((a%360)+360)%360;
+  let a=Math.atan2(q[0],-q[1])*180/Math.PI-cfg.rot;a=((a%360)+360)%360;
   const s=ORDER[Math.floor(((a+9)%360)/18)];
   if(d>=99&&d<=107)return{pts:s*3,dbl:false,label:'T'+s,x:nx,y:ny};
   if(d>=162)return{pts:s*2,dbl:true,label:'D'+s,x:nx,y:ny};
@@ -178,12 +179,13 @@ function render(){
 function draw(){
   const w=cv.width=wrap.clientWidth,h=cv.height=wrap.clientHeight;if(!w)return;
   const x=cv.getContext('2d');x.clearRect(0,0,w,h);
-  const cx=cfg.x*w,cy=cfg.y*h,R=cfg.r*w;
+  const cx=cfg.x*w,cy=cfg.y*h;
+  const P=(u,v)=>[cx+(cfg.m[0]*u+cfg.m[1]*v)*w,cy+(cfg.m[2]*u+cfg.m[3]*v)*w];
   x.lineWidth=1.5;x.strokeStyle='rgba(255,230,0,.85)';
-  [6.35,15.9,99,107,162,170].forEach(v=>{x.beginPath();x.arc(cx,cy,R*v/170,0,7);x.stroke()});
-  for(let k=0;k<20;k++){const a=(cfg.rot+9+18*k)*Math.PI/180;x.beginPath();x.moveTo(cx+Math.sin(a)*R*15.9/170,cy-Math.cos(a)*R*15.9/170);x.lineTo(cx+Math.sin(a)*R,cy-Math.cos(a)*R);x.stroke()}
+  [6.35,15.9,99,107,162,170].forEach(v=>{x.beginPath();for(let t=0;t<=72;t++){const a=t*Math.PI/36,p=P(Math.sin(a)*v/170,-Math.cos(a)*v/170);t?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1])}x.stroke()});
+  for(let k=0;k<20;k++){const a=(cfg.rot+9+18*k)*Math.PI/180,sn=Math.sin(a),cs=-Math.cos(a),p1=P(sn*15.9/170,cs*15.9/170),p2=P(sn,cs);x.beginPath();x.moveTo(p1[0],p1[1]);x.lineTo(p2[0],p2[1]);x.stroke()}
   x.fillStyle='#fff';x.font='bold 12px system-ui';x.textAlign='center';x.textBaseline='middle';
-  ORDER.forEach((n,k)=>{const a=(cfg.rot+18*k)*Math.PI/180;x.fillText(n,cx+Math.sin(a)*R*1.09,cy-Math.cos(a)*R*1.09)});
+  ORDER.forEach((n,k)=>{const a=(cfg.rot+18*k)*Math.PI/180,p=P(Math.sin(a)*1.09,-Math.cos(a)*1.09);x.fillText(n,p[0],p[1])});
   G.darts.forEach(d=>{const px=d.x*w,py=d.y*h;x.strokeStyle='#ff3b30';x.lineWidth=2.5;x.beginPath();x.moveTo(px-7,py-7);x.lineTo(px+7,py+7);x.moveTo(px+7,py-7);x.lineTo(px-7,py+7);x.stroke();x.fillStyle='#ff3b30';x.fillText(d.label,px,py-14)});
 }
 
@@ -196,7 +198,7 @@ function ptr(e,down){
   if(manual){addDart(hit(nx,ny))}
   else if(G.darts.length){G.darts[G.darts.length-1]=hit(nx,ny);calc();render()}
 }
-$('rs').oninput=e=>{cfg.r=+e.target.value;draw()};
+$('rs').oninput=e=>{const n=+e.target.value,f=n/cfg.r;cfg.m=cfg.m.map(v=>v*f);cfg.r=n;draw()};
 $('rr').oninput=e=>{cfg.rot=+e.target.value;draw()};
 $('bCal').onclick=()=>{calib=!calib;$('cal').style.display=calib?'block':'none';$('bCal').classList.toggle('pri',calib)};
 $('bMan').onclick=()=>{manual=!manual;$('bMan').classList.toggle('pri',manual);render()};
@@ -225,11 +227,11 @@ function grab(){
   const c=off.getContext('2d',{willReadFrequently:true});c.drawImage(s,0,0,FW,FH);
   const d=c.getImageData(0,0,FW,FH).data,g=new Uint8Array(FW*FH);
   for(let i=0;i<g.length;i++)g[i]=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11);
-  return{g,FH};
+  return{g,FH,d};
 }
 function inBoard(i,FH){
-  const px=i%FW,py=(i/FW)|0,dx=px-cfg.x*FW,dy=py-cfg.y*FH,R=cfg.r*FW*1.05;
-  return dx*dx+dy*dy<R*R;
+  const px=i%FW,py=(i/FW)|0,q=bp(px-cfg.x*FW,py-cfg.y*FH,FW);
+  return q[0]*q[0]+q[1]*q[1]<1.1;
 }
 function diff(a,b,collect){
   let n=0,N=0;const pts=[];
@@ -274,6 +276,41 @@ $('fPhoto').onchange=e=>{const f=e.target.files[0];if(!f)return;const im=$('pimg
     if(!ref){ref=g;camErr='Photo de référence prise. Lancez, puis reprenez une photo sans bouger le téléphone.';render();return}
     camErr='';fromDiff(g,ref);ref=g;render()};
   im.src=URL.createObjectURL(f);e.target.value=''};
+
+function stats(S){let cx=0,cy=0,a=0,b=0,c=0;S.forEach(p=>{cx+=p[0];cy+=p[1]});cx/=S.length;cy/=S.length;S.forEach(p=>{const x=p[0]-cx,y=p[1]-cy;a+=x*x;b+=x*y;c+=y*y});return{cx,cy,a:a/S.length,b:b/S.length,c:c/S.length}}
+function autoCal(n){
+  const msg=t=>{$('calmsg').textContent=t},f=grab();
+  if(!f){if(n<4)setTimeout(()=>autoCal(n+1),1000);return}
+  const FH=f.FH,P=[];
+  for(let i=0;i<f.g.length;i++){
+    const r=f.d[i*4]/255,g=f.d[i*4+1]/255,b=f.d[i*4+2]/255,mx=Math.max(r,g,b),mn=Math.min(r,g,b),dl=mx-mn;
+    if(mx<.25||dl/mx<.4)continue;
+    let h=(mx==r?((g-b)/dl+6)%6:mx==g?(b-r)/dl+2:(r-g)/dl+4)*60;
+    const red=h<18||h>342,grn=h>85&&h<165;
+    if(red||grn)P.push([i%FW,(i/FW)|0,red?1:0]);
+  }
+  const fail='Cible non détectée : rapprochez-vous, éclairez mieux ou calez à la main.';
+  if(P.length<80){msg(fail);return}
+  let S=P,st;
+  for(let it=0;it<5;it++){
+    st=stats(S);const det=st.a*st.c-st.b*st.b;if(det<=1e-6){msg(fail);return}
+    S=P.filter(p=>{const x=p[0]-st.cx,y=p[1]-st.cy;return(st.c*x*x-2*st.b*x*y+st.a*y*y)/det<5});
+    if(S.length<80){msg(fail);return}
+  }
+  st=stats(S);const det=st.a*st.c-st.b*st.b,sd=Math.sqrt(det),t=Math.sqrt(st.a+st.c+2*sd);
+  const ds=S.map(p=>{const x=p[0]-st.cx,y=p[1]-st.cy;return Math.sqrt((st.c*x*x-2*st.b*x*y+st.a*y*y)/det)}).sort((u,v)=>u-v);
+  const k=ds[Math.floor(ds.length*.97)]/.985;
+  const A=[(st.a+sd)/t*k,st.b/t*k,st.b/t*k,(st.c+sd)/t*k],dA=A[0]*A[3]-A[1]*A[2];
+  const band=[];
+  S.forEach(p=>{const dx=p[0]-st.cx,dy=p[1]-st.cy,u=(A[3]*dx-A[1]*dy)/dA,v=(-A[2]*dx+A[0]*dy)/dA,ro=Math.hypot(u,v);
+    if((ro>.55&&ro<.66)||(ro>.93&&ro<1.04))band.push([Math.atan2(u,-v)*180/Math.PI,p[2]])});
+  let best=0,bs=-1e9;
+  for(let ph=-18;ph<=18;ph+=1){let sc=0;band.forEach(q=>{const a=(((q[0]-ph)%360)+360)%360,kk=Math.floor(((a+9)%360)/18);sc+=((kk%2==0)==(q[1]==1))?1:-1});if(sc>bs){bs=sc;best=ph}}
+  cfg.x=st.cx/FW;cfg.y=st.cy/FH;cfg.m=A.map(v=>v/FW);cfg.r=Math.hypot(cfg.m[0],cfg.m[2]);cfg.rot=best;
+  $('rs').value=cfg.r;$('rr').value=best;ref=null;draw();
+  msg('Cible détectée ✓ Vérifiez que les cercles jaunes collent aux anneaux rouges et verts, sinon ajustez à la main.');
+}
+$('bAuto').onclick=()=>autoCal(0);
 function startLoop(){stopLoop();timer=setInterval(tick,250)}
 function stopLoop(){if(timer){clearInterval(timer);timer=null}}
 </script></body></html>
